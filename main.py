@@ -1,15 +1,14 @@
-import os
-import tempfile
-import requests
 import numpy as np
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-import tensorflow as tf
+import tflite_runtime.interpreter as tflite
 
 app = FastAPI()
 
-# Allow requests
+# ===============================
+# CORS (ALLOW FLUTTER APP)
+# ===============================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,14 +18,13 @@ app.add_middleware(
 )
 
 # ===============================
-# LOAD MODELS
+# LOAD TFLITE MODELS
 # ===============================
-
-verify_interpreter = tf.lite.Interpreter(
+verify_interpreter = tflite.Interpreter(
     model_path="coffee_leaf_verification.tflite"
 )
 
-rust_interpreter = tf.lite.Interpreter(
+rust_interpreter = tflite.Interpreter(
     model_path="coffee_rust_model.tflite"
 )
 
@@ -39,17 +37,17 @@ verify_output = verify_interpreter.get_output_details()
 rust_input = rust_interpreter.get_input_details()
 rust_output = rust_interpreter.get_output_details()
 
-print("✅ Models Loaded")
+print("✅ Coffee AI Models Loaded")
 
 
 # ===============================
-# IMAGE PREPROCESS
+# IMAGE PREPROCESSING
 # ===============================
-
 def preprocess(image: Image.Image):
     image = image.resize((224, 224))
     image = np.array(image).astype(np.float32)
 
+    # normalize [-1, 1]
     image = (image / 127.5) - 1
     image = np.expand_dims(image, axis=0)
 
@@ -57,25 +55,25 @@ def preprocess(image: Image.Image):
 
 
 # ===============================
-# ROOT
+# HEALTH CHECK
 # ===============================
-
 @app.get("/")
 def root():
-    return {"status": "Coffee AI Server Running"}
+    return {"status": "Coffee AI Server Running 🚀"}
 
 
 # ===============================
-# PREDICT FROM IMAGE FILE
+# PREDICTION ENDPOINT
 # ===============================
-
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
 
     image = Image.open(file.file).convert("RGB")
     input_data = preprocess(image)
 
-    # Verify model
+    # =========================
+    # STAGE 1: VERIFY COFFEE LEAF
+    # =========================
     verify_interpreter.set_tensor(
         verify_input[0]['index'],
         input_data
@@ -89,10 +87,12 @@ async def predict(file: UploadFile = File(...)):
     if verify_prob >= 0.5:
         return {
             "success": False,
-            "message": "Not a coffee leaf"
+            "message": "Not a coffee leaf. Please upload a clear coffee leaf image."
         }
 
-    # Rust model
+    # =========================
+    # STAGE 2: DISEASE DETECTION
+    # =========================
     rust_interpreter.set_tensor(
         rust_input[0]['index'],
         input_data
