@@ -3,14 +3,13 @@ import numpy as np
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
-import tensorflow as tf
 import tflite_runtime.interpreter as tflite
 
+# =========================
+# APP INIT
+# =========================
 app = FastAPI()
 
-# ===============================
-# CORS
-# ===============================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -19,16 +18,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ===============================
-# LOAD MODELS (SAFE PATH)
-# ===============================
+# =========================
+# MODEL PATHS
+# =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-verify_model_path = os.path.join(BASE_DIR, "coffee_leaf_verification.tflite")
-rust_model_path = os.path.join(BASE_DIR, "coffee_rust_model.tflite")
+VERIFY_MODEL_PATH = os.path.join(BASE_DIR, "coffee_leaf_verification.tflite")
+RUST_MODEL_PATH = os.path.join(BASE_DIR, "coffee_rust_model.tflite")
 
-verify_interpreter = tf.lite.Interpreter(model_path=verify_model_path)
-rust_interpreter = tf.lite.Interpreter(model_path=rust_model_path)
+# =========================
+# LOAD TFLITE MODELS
+# =========================
+verify_interpreter = tflite.Interpreter(model_path=VERIFY_MODEL_PATH)
+rust_interpreter = tflite.Interpreter(model_path=RUST_MODEL_PATH)
 
 verify_interpreter.allocate_tensors()
 rust_interpreter.allocate_tensors()
@@ -39,42 +41,42 @@ verify_output = verify_interpreter.get_output_details()
 rust_input = rust_interpreter.get_input_details()
 rust_output = rust_interpreter.get_output_details()
 
-print("✅ Coffee AI Models Loaded")
+print("☕ Coffee AI Models Loaded Successfully")
 
-
-# ===============================
-# PREPROCESS IMAGE
-# ===============================
-def preprocess(image: Image.Image):
-    image = image.resize((224, 224))
-    image = np.array(image).astype(np.float32)
-
-    image = (image / 127.5) - 1
-    image = np.expand_dims(image, axis=0)
-
-    return image
-
-
-# ===============================
-# ROOT
-# ===============================
+# =========================
+# HEALTH CHECK
+# =========================
 @app.get("/")
 def root():
     return {"status": "Coffee AI Server Running"}
 
+# =========================
+# IMAGE PREPROCESSING
+# =========================
+def preprocess_image(image: Image.Image):
+    image = image.resize((224, 224))
+    image = np.array(image).astype(np.float32)
 
-# ===============================
-# PREDICT
-# ===============================
+    # normalize [-1, 1]
+    image = (image / 127.5) - 1
+
+    image = np.expand_dims(image, axis=0)  # (1,224,224,3)
+    return image
+
+# =========================
+# PREDICT ENDPOINT
+# =========================
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
 
+    # read image
     image = Image.open(file.file).convert("RGB")
-    input_data = preprocess(image)
 
-    # =====================
-    # VERIFY MODEL
-    # =====================
+    input_data = preprocess_image(image)
+
+    # =========================
+    # STEP 1: VERIFY COFFEE LEAF
+    # =========================
     verify_interpreter.set_tensor(
         verify_input[0]["index"],
         input_data
@@ -85,15 +87,17 @@ async def predict(file: UploadFile = File(...)):
         verify_output[0]["index"]
     )[0][0]
 
+    # NOT a coffee leaf
     if verify_prob >= 0.5:
         return {
             "success": False,
-            "message": "Not a coffee leaf"
+            "message": "Not a coffee leaf. Please upload a valid coffee leaf image.",
+            "confidence": round(float(verify_prob * 100), 2)
         }
 
-    # =====================
-    # RUST MODEL
-    # =====================
+    # =========================
+    # STEP 2: RUST DETECTION
+    # =========================
     rust_interpreter.set_tensor(
         rust_input[0]["index"],
         input_data
@@ -104,15 +108,18 @@ async def predict(file: UploadFile = File(...)):
         rust_output[0]["index"]
     )[0][0]
 
+    # =========================
+    # RESULT LOGIC
+    # =========================
     if rust_prob > 0.5:
         disease = "Rust Disease"
-        confidence = float(rust_prob * 100)
+        confidence = rust_prob * 100
     else:
         disease = "Healthy Leaf"
-        confidence = float((1 - rust_prob) * 100)
+        confidence = (1 - rust_prob) * 100
 
     return {
         "success": True,
         "disease": disease,
-        "confidence": round(confidence, 2)
+        "confidence": round(float(confidence), 2)
     }
