@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
 python-multipart
-tflite-runtime
+# Force NumPy 1.x to avoid the multiarray error
+numpy<2.0.0
+# Use the full tensorflow-cpu to ensure all new opcodes (like version 12) are supported
+tensorflow-cpu==2.16.1
 pillow
-numpy

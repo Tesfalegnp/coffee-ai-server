@@ -2,16 +2,19 @@ import io
 import numpy as np
 from fastapi import FastAPI, File, UploadFile
 from PIL import Image
-import tflite_runtime.interpreter as tflite
+# Change this line
+import tensorflow as tf 
 
 app = FastAPI(title="CoffeeGuard AI Server")
 
-# Load Models
-verify_interpreter = tflite.Interpreter(model_path="coffee_leaf_verification.tflite")
+# Update these lines to use the new import
+verify_interpreter = tf.lite.Interpreter(model_path="coffee_leaf_verification.tflite")
 verify_interpreter.allocate_tensors()
 
-rust_interpreter = tflite.Interpreter(model_path="coffee_rust_model.tflite")
+rust_interpreter = tf.lite.Interpreter(model_path="coffee_rust_model.tflite")
 rust_interpreter.allocate_tensors()
+
+# ... rest of the code remains the same ...
 
 def preprocess_image(image_bytes):
     # Load image
