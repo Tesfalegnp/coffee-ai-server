@@ -1,77 +1,171 @@
 import io
+import os
 import numpy as np
-from fastapi import FastAPI, File, UploadFile
-from PIL import Image
-# Change this line
-import tensorflow as tf 
+import tensorflow as tf
 
+from fastapi import FastAPI, File, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
+
+# ==========================================
+# APP CONFIG
+# ==========================================
 app = FastAPI(title="CoffeeGuard AI Server")
 
-# Update these lines to use the new import
-verify_interpreter = tf.lite.Interpreter(model_path="coffee_leaf_verification.tflite")
-verify_interpreter.allocate_tensors()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-rust_interpreter = tf.lite.Interpreter(model_path="coffee_rust_model.tflite")
-rust_interpreter.allocate_tensors()
+# ==========================================
+# MODEL PATHS
+# ==========================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# ... rest of the code remains the same
+VERIFY_MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "coffee_leaf_strong_model.h5"
+)
 
+RUST_MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "coffee_rust_strong_model.h5"
+)
+
+# ==========================================
+# LOAD MODELS
+# ==========================================
+print("Loading AI models...")
+
+verify_model = tf.keras.models.load_model(
+    VERIFY_MODEL_PATH
+)
+
+rust_model = tf.keras.models.load_model(
+    RUST_MODEL_PATH
+)
+
+print("CoffeeGuard AI Models Loaded Successfully")
+
+# ==========================================
+# IMAGE PREPROCESS
+# ==========================================
 def preprocess_image(image_bytes):
-    # Load image
-    img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-    # Resize to 224x224 (Matches your Flutter code)
+    img = Image.open(
+        io.BytesIO(image_bytes)
+    ).convert("RGB")
+
     img = img.resize((224, 224))
-    # Convert to numpy array and normalize to [-1, 1]
-    input_data = np.array(img, dtype=np.float32)
-    input_data = (input_data / 127.5) - 1.0
-    # Add batch dimension [1, 224, 224, 3]
-    return np.expand_dims(input_data, axis=0)
 
+    img_array = np.array(
+        img,
+        dtype=np.float32
+    )
+
+    # Normalize to [-1,1]
+    img_array = (img_array / 127.5) - 1.0
+
+    # Shape => [1,224,224,3]
+    img_array = np.expand_dims(
+        img_array,
+        axis=0
+    )
+
+    return img_array
+
+# ==========================================
+# ROOT ROUTE
+# ==========================================
+@app.get("/")
+def root():
+    return {
+        "status": "CoffeeGuard Server is Running"
+    }
+
+# ==========================================
+# HEALTH CHECK
+# ==========================================
+@app.get("/health")
+def health():
+    return {
+        "success": True,
+        "server": "online"
+    }
+
+# ==========================================
+# PREDICT ROUTE
+# ==========================================
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(
+    file: UploadFile = File(...)
+):
     try:
+        # Read image bytes
         contents = await file.read()
-        input_tensor = preprocess_image(contents)
 
-        # Stage 1: Verification (Is it a coffee leaf?)
-        v_input_details = verify_interpreter.get_input_details()
-        v_output_details = verify_interpreter.get_output_details()
-        
-        verify_interpreter.set_tensor(v_input_details[0]['index'], input_tensor)
-        verify_interpreter.invoke()
-        verify_prob = verify_interpreter.get_tensor(v_output_details[0]['index'])[0][0]
+        # Preprocess
+        input_tensor = preprocess_image(
+            contents
+        )
 
+        # ==================================
+        # STAGE 1:
+        # VERIFY COFFEE LEAF
+        # ==================================
+        verify_pred = verify_model.predict(
+            input_tensor,
+            verbose=0
+        )
+
+        verify_prob = float(
+            verify_pred[0][0]
+        )
+
+        # If not coffee leaf
         if verify_prob >= 0.5:
             return {
                 "success": False,
                 "message": "Please provide a clear image of a coffee leaf.",
-                "confidence": round(float(verify_prob) * 100, 2)
+                "confidence": round(
+                    verify_prob * 100,
+                    2
+                )
             }
 
-        # Stage 2: Rust Detection
-        r_input_details = rust_interpreter.get_input_details()
-        r_output_details = rust_interpreter.get_output_details()
+        # ==================================
+        # STAGE 2:
+        # RUST DETECTION
+        # ==================================
+        rust_pred = rust_model.predict(
+            input_tensor,
+            verbose=0
+        )
 
-        rust_interpreter.set_tensor(r_input_details[0]['index'], input_tensor)
-        rust_interpreter.invoke()
-        rust_prob = rust_interpreter.get_tensor(r_output_details[0]['index'])[0][0]
+        rust_prob = float(
+            rust_pred[0][0]
+        )
 
         if rust_prob > 0.5:
             disease = "Rust Disease"
-            conf = rust_prob
+            confidence = rust_prob
         else:
             disease = "Healthy Leaf"
-            conf = 1.0 - rust_prob
+            confidence = 1.0 - rust_prob
 
         return {
             "success": True,
             "disease": disease,
-            "confidence": round(float(conf) * 100, 2)
+            "confidence": round(
+                confidence * 100,
+                2
+            )
         }
 
     except Exception as e:
-        return {"success": False, "message": str(e)}
-
-@app.get("/")
-def health_check():
-    return {"status": "CoffeeGuard Server is Running"}
+        return {
+            "success": False,
+            "message": str(e)
+        }
