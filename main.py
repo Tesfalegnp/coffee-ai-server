@@ -14,7 +14,7 @@ verify_interpreter.allocate_tensors()
 rust_interpreter = tf.lite.Interpreter(model_path="coffee_rust_model.tflite")
 rust_interpreter.allocate_tensors()
 
-# ... rest of the code remains the same ...
+# ... rest of the code remains the same
 
 def preprocess_image(image_bytes):
     # Load image
