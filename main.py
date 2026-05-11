@@ -25,91 +25,146 @@ app.add_middleware(
 # =====================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-VERIFY_MODEL_PATH = os.path.join(BASE_DIR, "coffee_leaf_strong_model.h5")
-RUST_MODEL_PATH = os.path.join(BASE_DIR, "coffee_rust_strong_model.h5")
+VERIFY_MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "coffee_leaf_strong_model.h5"
+)
+
+RUST_MODEL_PATH = os.path.join(
+    BASE_DIR,
+    "coffee_rust_strong_model.h5"
+)
 
 # =====================================================
 # LOAD MODELS
 # =====================================================
 print("Loading AI models...")
 
-verify_model = tf.keras.models.load_model(VERIFY_MODEL_PATH)
-rust_model = tf.keras.models.load_model(RUST_MODEL_PATH)
+verify_model = tf.keras.models.load_model(
+    VERIFY_MODEL_PATH
+)
+
+rust_model = tf.keras.models.load_model(
+    RUST_MODEL_PATH
+)
 
 print("CoffeeGuard AI Models Loaded Successfully")
 
 # =====================================================
-# IMAGE PREPROCESS (MATCH LOCAL EXACTLY)
+# IMAGE PREPROCESS
 # =====================================================
 def preprocess_image(image_bytes):
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    img = Image.open(
+        io.BytesIO(image_bytes)
+    ).convert("RGB")
+
     img = img.resize((224, 224))
 
-    img_array = np.array(img, dtype=np.float32)
+    img_array = np.array(
+        img,
+        dtype=np.float32
+    )
 
-    # SAME NORMALIZATION AS FLUTTER
+    # SAME AS FLUTTER LOCAL MODEL
     img_array = (img_array / 127.5) - 1.0
 
-    return np.expand_dims(img_array, axis=0)
+    img_array = np.expand_dims(
+        img_array,
+        axis=0
+    )
+
+    return img_array
+
 
 # =====================================================
-# ROOT
+# ROOT ROUTE
 # =====================================================
 @app.get("/")
 def root():
-    return {"status": "CoffeeGuard Server is Running"}
+    return {
+        "status": "CoffeeGuard Server is Running"
+    }
+
 
 # =====================================================
-# HEALTH
+# HEALTH ROUTE
 # =====================================================
 @app.get("/health")
 def health():
-    return {"success": True, "server": "online"}
+    return {
+        "success": True,
+        "server": "online"
+    }
+
 
 # =====================================================
-# PREDICT
+# PREDICT ROUTE
 # =====================================================
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
     try:
-        image_bytes = await file.read()
-        input_tensor = preprocess_image(image_bytes)
+        contents = await file.read()
+
+        input_tensor = preprocess_image(
+            contents
+        )
 
         # =================================================
-        # STAGE 1: COFFEE LEAF DETECTION
-        # FIXED MEANING: 1 = coffee leaf probability
+        # STAGE 1 : VERIFY COFFEE LEAF
+        # IMPORTANT:
+        # LOCAL APP USES:
+        # if verifyProb >= 0.5 => NOT coffee leaf
+        # so cloud must match same logic
         # =================================================
-        verify_pred = verify_model.predict(input_tensor, verbose=0)
+        verify_pred = verify_model.predict(
+            input_tensor,
+            verbose=0
+        )
 
-        verify_score = float(verify_pred[0][0])  # IS COFFEE LEAF
+        verify_prob = float(
+            verify_pred[0][0]
+        )
 
-        # ❌ NOT COFFEE LEAF
-        if verify_score < 0.5:
+        if verify_prob >= 0.5:
             return {
                 "success": False,
                 "message": "Please provide a clear image of a coffee leaf.",
-                "leafConfidence": round((1 - verify_score) * 100, 2)
+                "confidence": round(
+                    verify_prob * 100,
+                    2
+                )
             }
 
         # =================================================
-        # STAGE 2: DISEASE DETECTION
+        # STAGE 2 : RUST DETECTION
         # =================================================
-        rust_pred = rust_model.predict(input_tensor, verbose=0)
+        rust_pred = rust_model.predict(
+            input_tensor,
+            verbose=0
+        )
 
-        rust_score = float(rust_pred[0][0])
+        rust_prob = float(
+            rust_pred[0][0]
+        )
 
-        if rust_score > 0.5:
+        if rust_prob > 0.5:
             disease = "Rust Disease"
-            disease_conf = rust_score
+            confidence = rust_prob
         else:
             disease = "Healthy Leaf"
-            disease_conf = 1.0 - rust_score
+            confidence = 1.0 - rust_prob
 
         return {
             "success": True,
             "disease": disease,
-            "confidence": round(disease_conf * 100, 2),
-            "leafConfidence": round(verify_score * 100, 2)
+            "confidence": round(
+                confidence * 100,
+                2
+            ),
+            "leafConfidence": round(
+                (1 - verify_prob) * 100,
+                2
+            )
         }
 
     except Exception as e:
