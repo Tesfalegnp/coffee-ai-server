@@ -124,13 +124,14 @@ async def predict(
             verify_pred[0][0]
         )
 
-        # If not coffee leaf
-        if verify_prob >= 0.5:
+        # FIXED LOGIC:
+        # If below threshold = not coffee leaf
+        if verify_prob < 0.5:
             return {
                 "success": False,
                 "message": "Please provide a clear image of a coffee leaf.",
                 "confidence": round(
-                    verify_prob * 100,
+                    (1 - verify_prob) * 100,
                     2
                 )
             }
@@ -160,6 +161,10 @@ async def predict(
             "disease": disease,
             "confidence": round(
                 confidence * 100,
+                2
+            ),
+            "leafConfidence": round(
+                verify_prob * 100,
                 2
             )
         }
