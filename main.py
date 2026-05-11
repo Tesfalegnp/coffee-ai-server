@@ -7,9 +7,9 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 
-# ==========================================
+# =====================================================
 # APP CONFIG
-# ==========================================
+# =====================================================
 app = FastAPI(title="CoffeeGuard AI Server")
 
 app.add_middleware(
@@ -20,9 +20,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==========================================
+# =====================================================
 # MODEL PATHS
-# ==========================================
+# =====================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 VERIFY_MODEL_PATH = os.path.join(
@@ -35,9 +35,9 @@ RUST_MODEL_PATH = os.path.join(
     "coffee_rust_strong_model.h5"
 )
 
-# ==========================================
+# =====================================================
 # LOAD MODELS
-# ==========================================
+# =====================================================
 print("Loading AI models...")
 
 verify_model = tf.keras.models.load_model(
@@ -50,9 +50,9 @@ rust_model = tf.keras.models.load_model(
 
 print("CoffeeGuard AI Models Loaded Successfully")
 
-# ==========================================
+# =====================================================
 # IMAGE PREPROCESS
-# ==========================================
+# =====================================================
 def preprocess_image(image_bytes):
     img = Image.open(
         io.BytesIO(image_bytes)
@@ -65,10 +65,9 @@ def preprocess_image(image_bytes):
         dtype=np.float32
     )
 
-    # Normalize to [-1,1]
+    # SAME AS FLUTTER LOCAL MODEL
     img_array = (img_array / 127.5) - 1.0
 
-    # Shape => [1,224,224,3]
     img_array = np.expand_dims(
         img_array,
         axis=0
@@ -76,18 +75,20 @@ def preprocess_image(image_bytes):
 
     return img_array
 
-# ==========================================
+
+# =====================================================
 # ROOT ROUTE
-# ==========================================
+# =====================================================
 @app.get("/")
 def root():
     return {
         "status": "CoffeeGuard Server is Running"
     }
 
-# ==========================================
-# HEALTH CHECK
-# ==========================================
+
+# =====================================================
+# HEALTH ROUTE
+# =====================================================
 @app.get("/health")
 def health():
     return {
@@ -95,26 +96,26 @@ def health():
         "server": "online"
     }
 
-# ==========================================
+
+# =====================================================
 # PREDICT ROUTE
-# ==========================================
+# =====================================================
 @app.post("/predict")
-async def predict(
-    file: UploadFile = File(...)
-):
+async def predict(file: UploadFile = File(...)):
     try:
-        # Read image bytes
         contents = await file.read()
 
-        # Preprocess
         input_tensor = preprocess_image(
             contents
         )
 
-        # ==================================
-        # STAGE 1:
-        # VERIFY COFFEE LEAF
-        # ==================================
+        # =================================================
+        # STAGE 1 : VERIFY COFFEE LEAF
+        # IMPORTANT:
+        # LOCAL APP USES:
+        # if verifyProb >= 0.5 => NOT coffee leaf
+        # so cloud must match same logic
+        # =================================================
         verify_pred = verify_model.predict(
             input_tensor,
             verbose=0
@@ -124,22 +125,19 @@ async def predict(
             verify_pred[0][0]
         )
 
-        # FIXED LOGIC:
-        # If below threshold = not coffee leaf
-        if verify_prob < 0.5:
+        if verify_prob >= 0.5:
             return {
                 "success": False,
                 "message": "Please provide a clear image of a coffee leaf.",
                 "confidence": round(
-                    (1 - verify_prob) * 100,
+                    verify_prob * 100,
                     2
                 )
             }
 
-        # ==================================
-        # STAGE 2:
-        # RUST DETECTION
-        # ==================================
+        # =================================================
+        # STAGE 2 : RUST DETECTION
+        # =================================================
         rust_pred = rust_model.predict(
             input_tensor,
             verbose=0
@@ -164,7 +162,7 @@ async def predict(
                 2
             ),
             "leafConfidence": round(
-                verify_prob * 100,
+                (1 - verify_prob) * 100,
                 2
             )
         }
